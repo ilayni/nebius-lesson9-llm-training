@@ -1,0 +1,46 @@
+# Environment
+.env
+.env.*
+.venv/
+venv/
+env/
+ENV/
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.egg-info/
+dist/
+build/
+*.egg
+.eggs/
+
+# Jupyter
+.ipynb_checkpoints/
+*.ipynb_checkpoints
+
+# Generated notebook markdown mirror (reconverted on demand)
+From_Finetuning_to_Attention_Inside_LLMs_colab.md
+From_Finetuning_to_Attention_Inside_LLMs.md
+
+# Model checkpoints and adapters
+smollm2_checkpoints/
+flant5_checkpoints/
+smollm2_adapter/
+flant5_adapter/
+smollm2/
+*.safetensors
+*.bin
+
+# Config
+notebook_config.json
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Claude Code
+.claude/
