@@ -47,3 +47,56 @@ Boris Kogan — 7:40 AM
 @Yael Hamrani  Same question for multihead. If we multiply one random matrix with 3 times with random matices  to get Q, K, V and do it 4 times we will get 4 matrices more or less with equally distributed rows. What is the point of such assignment?
 Yael Hamrani — 7:59 AM
 To understand that fact exactly, that the embedding doesn’t change. That was the question, do the experiment report what you get and explain why.
+
+Have you got meaningful results for flan-t5 LoRA? I am getting complete gibberish (even after setting bf16=True)
+Aviad Stoler — Yesterday at 12:27 PM
+This does solve the training issue, so i get a "normal" training curve
+the other problem is what this model was design to do https://huggingface.co/docs/transformers/model_doc/flan-t5
+the prompt structure is a second issue 
+'''
+from transformers import AutoModelForSeq2SeqLM, AutoTokenizer
+
+
+model = AutoModelForSeq2SeqLM.from_pretrained("google/flan-t5-small", device_map="auto")
+tokenizer = AutoTokenizer.from_pretrained("google/flan-t5-small")
+
+inputs = tokenizer("A step by step recipe to make bolognese pasta:", return_tensors="pt").to(model.device)
+outputs = model.generate(**inputs)
+print(tokenizer.batch_decode(outputs, skip_special_tokens=True))
+['Pour a cup of bolognese into a large bowl and add the pasta']
+'''
+what i got from it 
+'''
+Question: What is a secured loan?
+Level: student
+
+Base output:
+“A secured loan is a loan for a student to apply for a loan.”
+
+Fine-tuned Flan-T5 output:
+“A secured loan is a type of loan that can be used to buy a home or buy a house. It is a type of loan that can be used to buy a house or buy a house.”
+
+Expected answer:
+“A secured loan is a type of loan that requires the borrower to pledge an asset, such as a car or a house, as collateral...”
+""" 
+
+Is its a good answer nope but its something
+FLAN-T5 · Hugging Face
+We’re on a journey to advance and democratize artificial intelligence through open source and open science.
+FLAN-T5 · Hugging Face
+Boris Kogan — Yesterday at 12:35 PM
+Can you share your training?
+Aviad Stoler — Yesterday at 1:10 PM
+what train csv q&a?
+Boris Kogan — Yesterday at 1:12 PM
+Yes. Training data and code. Just want to compare. 10x
+Mor Sondak
+OP
+ — Yesterday at 1:44 PM
+Sorry for jumping in, I can share that what worked for me was  reducing the evaluation set size and increasing the number of epochs. After making these changes the answers weren’t amazing but at least they weren’t completely gibberish.
+Boris Kogan — Yesterday at 1:58 PM
+Thank you. How many examples and epochs?
+Mor Sondak
+OP
+ — Yesterday at 2:01 PM
+My training set has 1700 examples, I reduced the evaluation set to 0.05. It’s not the best practice, but I felt I am losing valuable data. And 6 epochs.

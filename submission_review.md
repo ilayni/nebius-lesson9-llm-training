@@ -346,6 +346,97 @@ You should prepare:
 
 
 ```python
+import json
+import os
+
+def validate_jsonl_file(filepath):
+    if not os.path.exists(filepath):
+        print(f"Error: File '{filepath}' not found.")
+        return
+
+    print(f"Validating '{filepath}'...")
+    issues_found = False
+    with open(filepath, 'r') as f:
+        for i, line in enumerate(f):
+            line = line.strip()
+            if not line:
+                print(f"Warning: Empty line found at line {i+1}.")
+                continue
+            try:
+                json_obj = json.loads(line)
+                # Check if it's a dictionary, as expected for DataFrame rows
+                if not isinstance(json_obj, dict):
+                    print(f"Issue: Line {i+1} is not a JSON object: {line[:100]}...")
+                    issues_found = True
+            except json.JSONDecodeError as e:
+                print(f"Issue: Failed to decode JSON at line {i+1}: {e} - Line content: {line[:100]}...")
+                issues_found = True
+    if not issues_found:
+        print(f"✅ All lines in '{filepath}' are valid JSON objects.")
+
+validate_jsonl_file('train_seq2seq.jsonl')
+```
+
+    Error: File 'train_seq2seq.jsonl' not found.
+
+
+Based on the validation, if issues were found, you might need to regenerate the `train_seq2seq.jsonl` file. For now, let's try reading it more robustly by filtering out any problematic lines before creating the DataFrame.
+
+
+```python
+import pandas as pd
+import json
+import os
+
+filepath = 'train_seq2seq.jsonl'
+valid_records = []
+
+if os.path.exists(filepath):
+    with open(filepath, 'r') as f:
+        for i, line in enumerate(f):
+            line = line.strip()
+            if not line: # Skip empty lines
+                continue
+            try:
+                record = json.loads(line)
+                if isinstance(record, dict): # Ensure it's a dictionary
+                    valid_records.append(record)
+                else:
+                    print(f"Skipped invalid record (not a dict) at line {i+1}: {line[:100]}...")
+            except json.JSONDecodeError as e:
+                print(f"Skipped invalid JSON at line {i+1}: {e} - Line content: {line[:100]}...")
+
+    if valid_records:
+        df = pd.DataFrame(valid_records)
+        print(f"Successfully loaded {len(df)} records into DataFrame.")
+        print(f"train_seq2seq.jsonl: {len(df)} records")
+    else:
+        print(f"No valid records found in '{filepath}'. DataFrame is empty.")
+else:
+    print(f"Error: File '{filepath}' not found. Please ensure it's generated.")
+
+display(df.head())
+```
+
+    Error: File 'train_seq2seq.jsonl' not found. Please ensure it's generated.
+
+
+
+    ---------------------------------------------------------------------------
+
+    NameError                                 Traceback (most recent call last)
+
+    /tmp/ipykernel_944/504647542.py in <cell line: 0>()
+         30     print(f"Error: File '{filepath}' not found. Please ensure it's generated.")
+         31 
+    ---> 32 display(df.head())
+    
+
+    NameError: name 'df' is not defined
+
+
+
+```python
 import os
 from pydrive2.auth import GoogleAuth
 from pydrive2.drive import GoogleDrive
@@ -1053,231 +1144,6 @@ except Exception as e:
 
 ```python
 import json
-import random
-import os
-from datasets import load_dataset
-import pandas as pd
-from IPython.display import display
-
-def upload_to_drive(local_path, drive_folder_id):
-    file_title = os.path.basename(local_path)
-    query = f"'{drive_folder_id}' in parents and title = '{file_title}' and trashed = false"
-    file_list = drive.ListFile({'q': query}).GetList()
-    if file_list:
-        drive_file = file_list[0]
-    else:
-        drive_file = drive.CreateFile({'title': file_title, 'parents': [{'id': drive_folder_id}]})
-    drive_file.SetContentFile(local_path)
-    drive_file.Upload()
-    print(f'Uploaded {file_title} to Drive.')
-
-def show_file(path, title, head_only=True):
-    if os.path.exists(path):
-        print(f'\n--- {title} ---')
-        df = pd.read_json(path, lines=True)
-        display(df.head() if head_only else df)
-        print(f'Total records in {path}: {len(df)}')
-
-# 1. Regenerate from full dataset
-ds = load_dataset('databricks/databricks-dolly-15k', split='train[:5000]')
-filtered = [ex for ex in ds if ex['category'] == 'open_qa' and any(q in ex['instruction'].lower() for q in ['why', 'how', 'what is', 'explain'])]
-
-def generate_full_training_sets(filtered_data):
-    train_causal = []
-    train_seq2seq = []
-    levels = ['child', 'student', 'expert']
-    for item in filtered_data:
-        q, r = item['instruction'], item['response']
-        for lvl in levels:
-            if lvl == 'child': ans = f"Imagine this: {r}. It's very simple!"
-            elif lvl == 'expert': ans = f"Technical Analysis: The underlying mechanisms of {r} involve complex factors."
-            else: ans = f"Educational Explanation: {r}. This is a key concept for students."
-            train_causal.append({'text': f"### Question:\n{q}\n\n### Expertise level:\n{lvl}\n\n### Answer:\n{ans}"})
-            train_seq2seq.append({'input': f"Question: {q} Expertise level: {lvl}", 'target': ans})
-
-    with open('train_causal.jsonl', 'w') as f:
-        for entry in train_causal: f.write(json.dumps(entry) + '\n')
-
-    # Only update causal for now as requested
-    print(f'✅ Generated {len(train_causal)} records for train_causal.jsonl.')
-
-generate_full_training_sets(filtered)
-
-# 2. Upload to Drive (overwriting previous)
-if 'FOLDER_ID' in globals() and FOLDER_ID:
-    upload_to_drive('train_causal.jsonl', FOLDER_ID)
-
-show_file('train_causal.jsonl', 'Updated Full Causal Training Set')
-```
-
-    /usr/local/lib/python3.12/dist-packages/huggingface_hub/utils/_auth.py:93: UserWarning: 
-    The secret `HF_TOKEN` does not exist in your Colab secrets.
-    To authenticate with the Hugging Face Hub, create a token in your settings tab (https://huggingface.co/settings/tokens), set it as secret in your Google Colab and restart your session.
-    You will be able to reuse this secret in all of your notebooks.
-    Please note that authentication is recommended but still optional to access public models or datasets.
-      warnings.warn(
-
-
-
-    README.md: 0.00B [00:00, ?B/s]
-
-
-    Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and faster downloads.
-    WARNING:huggingface_hub.utils._http:Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and faster downloads.
-
-
-
-    databricks-dolly-15k.jsonl:   0%|          | 0.00/13.1M [00:00<?, ?B/s]
-
-
-
-    Generating train split:   0%|          | 0/15011 [00:00<?, ? examples/s]
-
-
-    ✅ Generated 1740 records for train_causal.jsonl.
-    
-    --- Updated Full Causal Training Set ---
-
-
-
-
-  <div id="df-5e63a28c-b531-4f69-a9e9-3b918126eaaa" class="colab-df-container">
-    <div>
-<style scoped>
-    .dataframe tbody tr th:only-of-type {
-        vertical-align: middle;
-    }
-
-    .dataframe tbody tr th {
-        vertical-align: top;
-    }
-
-    .dataframe thead th {
-        text-align: right;
-    }
-</style>
-<table border="1" class="dataframe">
-  <thead>
-    <tr style="text-align: right;">
-      <th></th>
-      <th>text</th>
-    </tr>
-  </thead>
-  <tbody>
-    <tr>
-      <th>0</th>
-      <td>### Question:\nWhy can camels survive for long...</td>
-    </tr>
-    <tr>
-      <th>1</th>
-      <td>### Question:\nWhy can camels survive for long...</td>
-    </tr>
-    <tr>
-      <th>2</th>
-      <td>### Question:\nWhy can camels survive for long...</td>
-    </tr>
-    <tr>
-      <th>3</th>
-      <td>### Question:\nWhat is a polygon?\n\n### Exper...</td>
-    </tr>
-    <tr>
-      <th>4</th>
-      <td>### Question:\nWhat is a polygon?\n\n### Exper...</td>
-    </tr>
-  </tbody>
-</table>
-</div>
-    <div class="colab-df-buttons">
-
-  <div class="colab-df-container">
-    <button class="colab-df-convert" onclick="convertToInteractive('df-5e63a28c-b531-4f69-a9e9-3b918126eaaa')"
-            title="Convert this dataframe to an interactive table."
-            style="display:none;">
-
-  <svg xmlns="http://www.w3.org/2000/svg" height="24px" viewBox="0 -960 960 960">
-    <path d="M120-120v-720h720v720H120Zm60-500h600v-160H180v160Zm220 220h160v-160H400v160Zm0 220h160v-160H400v160ZM180-400h160v-160H180v160Zm440 0h160v-160H620v160ZM180-180h160v-160H180v160Zm440 0h160v-160H620v160Z"/>
-  </svg>
-    </button>
-
-  <style>
-    .colab-df-container {
-      display:flex;
-      gap: 12px;
-    }
-
-    .colab-df-convert {
-      background-color: #E8F0FE;
-      border: none;
-      border-radius: 50%;
-      cursor: pointer;
-      display: none;
-      fill: #1967D2;
-      height: 32px;
-      padding: 0 0 0 0;
-      width: 32px;
-    }
-
-    .colab-df-convert:hover {
-      background-color: #E2EBFA;
-      box-shadow: 0px 1px 2px rgba(60, 64, 67, 0.3), 0px 1px 3px 1px rgba(60, 64, 67, 0.15);
-      fill: #174EA6;
-    }
-
-    .colab-df-buttons div {
-      margin-bottom: 4px;
-    }
-
-    [theme=dark] .colab-df-convert {
-      background-color: #3B4455;
-      fill: #D2E3FC;
-    }
-
-    [theme=dark] .colab-df-convert:hover {
-      background-color: #434B5C;
-      box-shadow: 0px 1px 3px 1px rgba(0, 0, 0, 0.15);
-      filter: drop-shadow(0px 1px 2px rgba(0, 0, 0, 0.3));
-      fill: #FFFFFF;
-    }
-  </style>
-
-    <script>
-      const buttonEl =
-        document.querySelector('#df-5e63a28c-b531-4f69-a9e9-3b918126eaaa button.colab-df-convert');
-      buttonEl.style.display =
-        google.colab.kernel.accessAllowed ? 'block' : 'none';
-
-      async function convertToInteractive(key) {
-        const element = document.querySelector('#df-5e63a28c-b531-4f69-a9e9-3b918126eaaa');
-        const dataTable =
-          await google.colab.kernel.invokeFunction('convertToInteractive',
-                                                    [key], {});
-        if (!dataTable) return;
-
-        const docLinkHtml = 'Like what you see? Visit the ' +
-          '<a target="_blank" href=https://colab.research.google.com/notebooks/data_table.ipynb>data table notebook</a>'
-          + ' to learn more about interactive tables.';
-        element.innerHTML = '';
-        dataTable['output_type'] = 'display_data';
-        await google.colab.output.renderOutput(dataTable, element);
-        const docLink = document.createElement('div');
-        docLink.innerHTML = docLinkHtml;
-        element.appendChild(docLink);
-      }
-    </script>
-  </div>
-
-
-    </div>
-  </div>
-
-
-
-    Total records in train_causal.jsonl: 1740
-
-
-
-```python
-import json
 import pandas as pd
 import os
 
@@ -1326,7 +1192,7 @@ Pay attention each model requires the dataset to be formated diffrently.
 !pip install -U -q "bitsandbytes>=0.46.1" accelerate
 ```
 
-    [2K   [90m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[0m [32m60.7/60.7 MB[0m [31m16.5 MB/s[0m eta [36m0:00:00[0m
+    [2K   [90m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[0m [32m60.7/60.7 MB[0m [31m41.9 MB/s[0m eta [36m0:00:00[0m
     [?25h
 
 
@@ -1840,6 +1706,20 @@ if 'FLANT5_ADAPTER_ID' in globals():
     for f in os.listdir("flant5_adapter"): upload_to_drive(f"flant5_adapter/{f}", FLANT5_ADAPTER_ID)
 ```
 
+    /usr/local/lib/python3.12/dist-packages/huggingface_hub/utils/_auth.py:93: UserWarning: 
+    The secret `HF_TOKEN` does not exist in your Colab secrets.
+    To authenticate with the Hugging Face Hub, create a token in your settings tab (https://huggingface.co/settings/tokens), set it as secret in your Google Colab and restart your session.
+    You will be able to reuse this secret in all of your notebooks.
+    Please note that authentication is recommended but still optional to access public models or datasets.
+      warnings.warn(
+    Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and faster downloads.
+    WARNING:huggingface_hub.utils._http:Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and faster downloads.
+
+
+
+    model.safetensors:   0%|          | 0.00/308M [00:00<?, ?B/s]
+
+
 
     Loading weights:   0%|          | 0/190 [00:00<?, ?it/s]
 
@@ -1848,7 +1728,11 @@ if 'FLANT5_ADAPTER_ID' in globals():
 
 
 
-    Map:   0%|          | 0/60 [00:00<?, ? examples/s]
+    generation_config.json:   0%|          | 0.00/147 [00:00<?, ?B/s]
+
+
+
+    Map:   0%|          | 0/1740 [00:00<?, ? examples/s]
 
 
     /usr/local/lib/python3.12/dist-packages/torch/_dynamo/eval_frame.py:1181: UserWarning: torch.utils.checkpoint: the use_reentrant parameter should be passed explicitly. Starting in PyTorch 2.9, calling checkpoint without use_reentrant will raise an exception. use_reentrant=False is recommended, but if you need to preserve the current default behavior, you can pass use_reentrant=True. Refer to docs for more details on the differences between the two variants.
@@ -1859,8 +1743,8 @@ if 'FLANT5_ADAPTER_ID' in globals():
 
     <div>
 
-      <progress value='12' max='12' style='width:300px; height:20px; vertical-align: middle;'></progress>
-      [12/12 00:10, Epoch 3/3]
+      <progress value='327' max='327' style='width:300px; height:20px; vertical-align: middle;'></progress>
+      [327/327 05:42, Epoch 3/3]
     </div>
     <table border="1" class="dataframe">
   <thead>
@@ -1870,13 +1754,32 @@ if 'FLANT5_ADAPTER_ID' in globals():
     </tr>
   </thead>
   <tbody>
+    <tr>
+      <td>50</td>
+      <td>43.784482</td>
+    </tr>
+    <tr>
+      <td>100</td>
+      <td>42.807041</td>
+    </tr>
+    <tr>
+      <td>150</td>
+      <td>40.821562</td>
+    </tr>
+    <tr>
+      <td>200</td>
+      <td>39.096929</td>
+    </tr>
+    <tr>
+      <td>250</td>
+      <td>37.271870</td>
+    </tr>
+    <tr>
+      <td>300</td>
+      <td>36.497915</td>
+    </tr>
   </tbody>
 </table><p>
-
-
-    Uploaded README.md to Drive.
-    Uploaded adapter_model.safetensors to Drive.
-    Uploaded adapter_config.json to Drive.
 
 
 ### Drive Sync Verification
@@ -1937,9 +1840,9 @@ print("\nVerification and sync complete.")
 
     Folder smollm2_adapter not found locally.
     --- Syncing flant5_adapter ---
+    Uploaded adapter_config.json to Drive.
     Uploaded README.md to Drive.
     Uploaded adapter_model.safetensors to Drive.
-    Uploaded adapter_config.json to Drive.
     
     Verification and sync complete.
 
@@ -2760,88 +2663,6 @@ verify_dataset_integrity()
     </div>
   </div>
 
-
-
-
-```python
-import json
-import os
-from datasets import load_dataset
-
-# 1. Load and Filter Dolly to get the full subset
-ds = load_dataset('databricks/databricks-dolly-15k', split='train[:5000]')
-filtered = [ex for ex in ds if ex['category'] == 'open_qa' and any(q in ex['instruction'].lower() for q in ['why', 'how', 'what is', 'explain'])]
-
-# 2. Generate Full Training Sets (All 3 levels per question)
-def generate_expanded_datasets(filtered_data):
-    train_causal, train_seq2seq = [], []
-    levels = ['child', 'student', 'expert']
-
-    for item in filtered_data:
-        q, r = item['instruction'], item['response']
-        for lvl in levels:
-            if lvl == 'child': ans = f"Imagine this: {r}. It's very simple!"
-            elif lvl == 'expert': ans = f"Technical Analysis: The underlying mechanisms of {r} involve complex factors."
-            else: ans = f"Educational Explanation: {r}. This is a key concept for students."
-
-            train_causal.append({'text': f"### Question:\n{q}\n\n### Expertise level:\n{lvl}\n\n### Answer:\n{ans}"})
-            train_seq2seq.append({'input': f"Question: {q} Expertise level: {lvl}", 'target': ans})
-
-    with open('train_causal.jsonl', 'w') as f:
-        for entry in train_causal: f.write(json.dumps(entry) + '\n')
-    with open('train_seq2seq.jsonl', 'w') as f:
-        for entry in train_seq2seq: f.write(json.dumps(entry) + '\n')
-
-    print(f"✅ Generated {len(train_causal)} records for training (Causal and Seq2Seq).")
-
-generate_expanded_datasets(filtered)
-print("\n⚠️ FINAL STEP: Go to 'Runtime' > 'Restart session' now to fix the bitsandbytes ImportError.")
-```
-
-    ✅ Generated 1740 records for training (Causal and Seq2Seq).
-    
-    ⚠️ FINAL STEP: Go to 'Runtime' > 'Restart session' now to fix the bitsandbytes ImportError.
-
-
-
-```python
-import json
-import os
-from datasets import load_dataset
-
-# 1. Load and Filter Dolly
-ds = load_dataset('databricks/databricks-dolly-15k', split='train[:5000]')
-filtered = [ex for ex in ds if ex['category'] == 'open_qa' and any(q in ex['instruction'].lower() for q in ['why', 'how', 'what is', 'explain'])]
-
-# 2. Generate Full Training Sets (All levels per question)
-def generate_expanded_datasets(filtered_data):
-    train_causal, train_seq2seq = [], []
-    levels = ['child', 'student', 'expert']
-
-    for item in filtered_data:
-        q, r = item['instruction'], item['response']
-        for lvl in levels:
-            if lvl == 'child': ans = f"Imagine this: {r}. It's very simple!"
-            elif lvl == 'expert': ans = f"Technical Analysis: The underlying mechanisms of {r} involve complex factors."
-            else: ans = f"Educational Explanation: {r}. This is a key concept for students."
-
-            train_causal.append({'text': f"### Question:\n{q}\n\n### Expertise level:\n{lvl}\n\n### Answer:\n{ans}"})
-            train_seq2seq.append({'input': f"Question: {q} Expertise level: {lvl}", 'target': ans})
-
-    with open('train_causal.jsonl', 'w') as f:
-        for entry in train_causal: f.write(json.dumps(entry) + '\n')
-    with open('train_seq2seq.jsonl', 'w') as f:
-        for entry in train_seq2seq: f.write(json.dumps(entry) + '\n')
-
-    print(f"✅ Generated {len(train_causal)} training records.")
-
-generate_expanded_datasets(filtered)
-print("\n⚠️ NOW RESTART YOUR SESSION: 'Runtime' > 'Restart session' to apply bitsandbytes fix.")
-```
-
-    ✅ Generated 1740 training records.
-    
-    ⚠️ NOW RESTART YOUR SESSION: 'Runtime' > 'Restart session' to apply bitsandbytes fix.
 
 
 ### 1. Upload Expanded Training Data to Google Drive
@@ -3690,67 +3511,6 @@ print(f"✅ Overwrote stale Drive file with {len(smollm_df)} rows from the 1740-
 
 ```python
 import os
-import pandas as pd
-import json
-from datasets import load_dataset
-
-def force_verify_and_fix():
-    print("--- Definitive Dataset Audit ---")
-    files = ['train_causal.jsonl', 'train_causal_full.jsonl', 'train_seq2seq.jsonl']
-    counts = {}
-
-    for f in files:
-        if os.path.exists(f):
-            count = len(pd.read_json(f, lines=True))
-            counts[f] = count
-            print(f"{f}: {count} records found.")
-        else:
-            print(f"{f}: Not found.")
-
-    # If the main training file is still 60 or missing, we rebuild from filtered variable
-    if counts.get('train_causal.jsonl', 0) < 1700:
-        print("\n⚠️ Main file is truncated or missing. Rebuilding 1,740 records...")
-        # Use existing 'filtered' if available, else reload
-        global filtered
-        if 'filtered' not in globals():
-            ds = load_dataset('databricks/databricks-dolly-15k', split='train[:5000]')
-            filtered = [ex for ex in ds if ex['category'] == 'open_qa' and any(q in ex['instruction'].lower() for q in ['why', 'how', 'what is', 'explain'])]
-
-        new_causal = []
-        levels = ['child', 'student', 'expert']
-        for item in filtered:
-            q, r = item['instruction'], item['response']
-            for lvl in levels:
-                if lvl == 'child': ans = f"Imagine this: {r}. It's very simple!"
-                elif lvl == 'expert': ans = f"Technical Analysis: The underlying mechanisms of {r} involve complex factors."
-                else: ans = f"Educational Explanation: {r}. This is a key concept for students."
-                new_causal.append({'text': f"### Question:\n{q}\n\n### Expertise level:\n{lvl}\n\n### Answer:\n{ans}"})
-
-        with open('train_causal.jsonl', 'w') as f:
-            for entry in new_causal: f.write(json.dumps(entry) + '\n')
-
-        print(f"✅ REPAIRED: 'train_causal.jsonl' now has {len(new_causal)} records.")
-
-        # Immediate Sync to Drive to overwrite the bad 60-row version
-        if 'FOLDER_ID' in globals():
-            upload_to_drive('train_causal.jsonl', FOLDER_ID)
-    else:
-        print("\n✅ 'train_causal.jsonl' is already correct at 1,740 records.")
-
-force_verify_and_fix()
-```
-
-    --- Definitive Dataset Audit ---
-    train_causal.jsonl: 1740 records found.
-    train_causal_full.jsonl: Not found.
-    train_seq2seq.jsonl: 1740 records found.
-    
-    ✅ 'train_causal.jsonl' is already correct at 1,740 records.
-
-
-
-```python
-import os
 
 # 1. Ensure the seq2seq training file exists locally (re-generate if missing from 1740 records)
 if not os.path.exists('train_seq2seq.jsonl') and 'filtered' in globals():
@@ -3849,6 +3609,8 @@ print("✅ Environment refreshed. You can now proceed to the Model Loading and T
 - **Faithfulness:** FT outputs stay on-topic for the majority of rows. Content accuracy varies — row 7 (Tableau) correctly identifies it as a data analytics tool; row 13 (coins) gives wrong answer ($1.10 vs $1.19).
 - **Hallucinations:** Base model hallucinates more — row 4 outputs Paris, row 14 outputs a painting. Fine-tuning significantly reduced off-topic responses.
 - **Overall:** Fine-tuning on 1740 records produced clear improvement in format adherence (20/20 rows) and reduced hallucinations. Content accuracy is mixed but consistently better than base.
+
+**Flan t5 eval**
 
 
 ```python
@@ -3987,7 +3749,7 @@ if ft_model_t5:
 
 
 
-  <div id="df-1a09c4d8-135f-4e54-aac3-fa834c54ad2b" class="colab-df-container">
+  <div id="df-a69a06ca-92a1-4a35-95c7-39b9cfd83167" class="colab-df-container">
     <div>
 <style scoped>
     .dataframe tbody tr th:only-of-type {
@@ -4020,180 +3782,180 @@ if ft_model_t5:
       <td>Question: How many feet are in 1 mile? Experti...</td>
       <td>child</td>
       <td>a mile</td>
-      <td>a mile</td>
+      <td>swiss</td>
       <td>Imagine this: 5,280 feet. It's very simple!</td>
-      <td>No</td>
+      <td>Yes</td>
     </tr>
     <tr>
       <th>1</th>
       <td>Question: What is Project Mosaic? Expertise le...</td>
       <td>student</td>
       <td>a student</td>
-      <td>a student</td>
+      <td>university</td>
       <td>Educational Explanation: Mosaic is an extensio...</td>
-      <td>No</td>
+      <td>Yes</td>
     </tr>
     <tr>
       <th>2</th>
       <td>Question: How many different Alaska Native tri...</td>
       <td>expert</td>
       <td>3</td>
-      <td>3</td>
+      <td>experts</td>
       <td>Technical Analysis: The underlying mechanisms ...</td>
-      <td>No</td>
+      <td>Yes</td>
     </tr>
     <tr>
       <th>3</th>
       <td>Question: Why do people eat food? Expertise le...</td>
       <td>child</td>
       <td>food is a food</td>
-      <td>food is a food</td>
+      <td>health</td>
       <td>Imagine this: People eat food for sustenance a...</td>
-      <td>No</td>
+      <td>Yes</td>
     </tr>
     <tr>
       <th>4</th>
       <td>Question: What is the best sport? Expertise le...</td>
       <td>student</td>
       <td>acrobatics</td>
-      <td>acrobatics</td>
+      <td>school</td>
       <td>Educational Explanation: It depends on who you...</td>
-      <td>No</td>
+      <td>Yes</td>
     </tr>
     <tr>
       <th>5</th>
       <td>Question: What is 'karma' according to Buddhis...</td>
       <td>expert</td>
       <td>guru</td>
-      <td>guru</td>
+      <td>master</td>
       <td>Technical Analysis: The underlying mechanisms ...</td>
-      <td>No</td>
+      <td>Yes</td>
     </tr>
     <tr>
       <th>6</th>
       <td>Question: What is the difference between Ameri...</td>
       <td>child</td>
       <td>scrimmage</td>
-      <td>scrimmage</td>
+      <td>symphony</td>
       <td>Imagine this: In America, football refers to t...</td>
-      <td>No</td>
+      <td>Yes</td>
     </tr>
     <tr>
       <th>7</th>
       <td>Question: What is Tableau? Expertise level: st...</td>
       <td>student</td>
       <td>a student</td>
-      <td>a student</td>
+      <td>level</td>
       <td>Educational Explanation: Tableau software is a...</td>
-      <td>No</td>
+      <td>Yes</td>
     </tr>
     <tr>
       <th>8</th>
       <td>Question: Why is sailing so much fun? Expertis...</td>
       <td>expert</td>
       <td>a person who is a novice</td>
-      <td>a person who is a novice</td>
+      <td>level</td>
       <td>Technical Analysis: The underlying mechanisms ...</td>
-      <td>No</td>
+      <td>Yes</td>
     </tr>
     <tr>
       <th>9</th>
       <td>Question: Why sport cricket is so famous? Expe...</td>
       <td>child</td>
       <td>cricket</td>
-      <td>cricket</td>
+      <td>sex</td>
       <td>Imagine this: Cricket is a very interesting an...</td>
-      <td>No</td>
+      <td>Yes</td>
     </tr>
     <tr>
       <th>10</th>
       <td>Question: What is a weed wacker? Expertise lev...</td>
       <td>student</td>
       <td>weed wacker</td>
-      <td>weed wacker</td>
+      <td>school</td>
       <td>Educational Explanation: A weed wacker is a st...</td>
-      <td>No</td>
+      <td>Yes</td>
     </tr>
     <tr>
       <th>11</th>
       <td>Question: What is a stock index? Expertise lev...</td>
       <td>expert</td>
       <td>equities</td>
-      <td>equities</td>
+      <td>level</td>
       <td>Technical Analysis: The underlying mechanisms ...</td>
-      <td>No</td>
+      <td>Yes</td>
     </tr>
     <tr>
       <th>12</th>
       <td>Question: Why don't women have beards? Experti...</td>
       <td>child</td>
       <td>sex</td>
-      <td>sex</td>
+      <td>health</td>
       <td>Imagine this: Facial hair is typical in our an...</td>
-      <td>No</td>
+      <td>Yes</td>
     </tr>
     <tr>
       <th>13</th>
       <td>Question: What is the largest amount of money ...</td>
       <td>student</td>
       <td>a dollar</td>
-      <td>a dollar</td>
+      <td>equivalency</td>
       <td>Educational Explanation: To make change for a ...</td>
-      <td>No</td>
+      <td>Yes</td>
     </tr>
     <tr>
       <th>14</th>
       <td>Question: how many times did India won the cri...</td>
       <td>expert</td>
       <td>batting</td>
-      <td>batting</td>
+      <td>a</td>
       <td>Technical Analysis: The underlying mechanisms ...</td>
-      <td>No</td>
+      <td>Yes</td>
     </tr>
     <tr>
       <th>15</th>
       <td>Question: What is a Romance language? Expertis...</td>
       <td>child</td>
       <td>sex</td>
-      <td>sex</td>
+      <td>syllables</td>
       <td>Imagine this: A romance language refers to the...</td>
-      <td>No</td>
+      <td>Yes</td>
     </tr>
     <tr>
       <th>16</th>
       <td>Question: What is the Gun Show in New Zealand ...</td>
       <td>student</td>
       <td>acrobatics</td>
-      <td>acrobatics</td>
+      <td>school</td>
       <td>Educational Explanation: Welcome to the Gun Sh...</td>
-      <td>No</td>
+      <td>Yes</td>
     </tr>
     <tr>
       <th>17</th>
       <td>Question: What is a pineapple? Expertise level...</td>
       <td>expert</td>
       <td>pineapple</td>
-      <td>pineapple</td>
+      <td>level</td>
       <td>Technical Analysis: The underlying mechanisms ...</td>
-      <td>No</td>
+      <td>Yes</td>
     </tr>
     <tr>
       <th>18</th>
       <td>Question: What is the difference between pets ...</td>
       <td>child</td>
       <td>a dog</td>
-      <td>a dog</td>
+      <td>sex</td>
       <td>Imagine this: Although both are animals at the...</td>
-      <td>No</td>
+      <td>Yes</td>
     </tr>
     <tr>
       <th>19</th>
       <td>Question: How do you maintain good dental hygi...</td>
       <td>student</td>
       <td>is a good student</td>
-      <td>is a good student</td>
+      <td>a specialized</td>
       <td>Educational Explanation: Good dental hygiene i...</td>
-      <td>No</td>
+      <td>Yes</td>
     </tr>
   </tbody>
 </table>
@@ -4201,7 +3963,7 @@ if ft_model_t5:
     <div class="colab-df-buttons">
 
   <div class="colab-df-container">
-    <button class="colab-df-convert" onclick="convertToInteractive('df-1a09c4d8-135f-4e54-aac3-fa834c54ad2b')"
+    <button class="colab-df-convert" onclick="convertToInteractive('df-a69a06ca-92a1-4a35-95c7-39b9cfd83167')"
             title="Convert this dataframe to an interactive table."
             style="display:none;">
 
@@ -4253,12 +4015,12 @@ if ft_model_t5:
 
     <script>
       const buttonEl =
-        document.querySelector('#df-1a09c4d8-135f-4e54-aac3-fa834c54ad2b button.colab-df-convert');
+        document.querySelector('#df-a69a06ca-92a1-4a35-95c7-39b9cfd83167 button.colab-df-convert');
       buttonEl.style.display =
         google.colab.kernel.accessAllowed ? 'block' : 'none';
 
       async function convertToInteractive(key) {
-        const element = document.querySelector('#df-1a09c4d8-135f-4e54-aac3-fa834c54ad2b');
+        const element = document.querySelector('#df-a69a06ca-92a1-4a35-95c7-39b9cfd83167');
         const dataTable =
           await google.colab.kernel.invokeFunction('convertToInteractive',
                                                     [key], {});
@@ -4278,7 +4040,7 @@ if ft_model_t5:
   </div>
 
 
-  <div id="id_b3c9fd30-2c54-441a-b1db-2204ec528048">
+  <div id="id_daa3a0b9-7c17-496d-899b-8f6c9f0ec5f3">
     <style>
       .colab-df-generate {
         background-color: #E8F0FE;
@@ -4322,7 +4084,7 @@ if ft_model_t5:
     <script>
       (() => {
       const buttonEl =
-        document.querySelector('#id_b3c9fd30-2c54-441a-b1db-2204ec528048 button.colab-df-generate');
+        document.querySelector('#id_daa3a0b9-7c17-496d-899b-8f6c9f0ec5f3 button.colab-df-generate');
       buttonEl.style.display =
         google.colab.kernel.accessAllowed ? 'block' : 'none';
 
@@ -4616,7 +4378,7 @@ else:
 
 
 
-  <div id="df-2febb444-1c09-476b-83d5-c53b3b08a8ef" class="colab-df-container">
+  <div id="df-8785c767-0798-4e28-9359-62573ccfc516" class="colab-df-container">
     <div>
 <style scoped>
     .dataframe tbody tr th:only-of-type {
@@ -4830,7 +4592,7 @@ else:
     <div class="colab-df-buttons">
 
   <div class="colab-df-container">
-    <button class="colab-df-convert" onclick="convertToInteractive('df-2febb444-1c09-476b-83d5-c53b3b08a8ef')"
+    <button class="colab-df-convert" onclick="convertToInteractive('df-8785c767-0798-4e28-9359-62573ccfc516')"
             title="Convert this dataframe to an interactive table."
             style="display:none;">
 
@@ -4882,12 +4644,12 @@ else:
 
     <script>
       const buttonEl =
-        document.querySelector('#df-2febb444-1c09-476b-83d5-c53b3b08a8ef button.colab-df-convert');
+        document.querySelector('#df-8785c767-0798-4e28-9359-62573ccfc516 button.colab-df-convert');
       buttonEl.style.display =
         google.colab.kernel.accessAllowed ? 'block' : 'none';
 
       async function convertToInteractive(key) {
-        const element = document.querySelector('#df-2febb444-1c09-476b-83d5-c53b3b08a8ef');
+        const element = document.querySelector('#df-8785c767-0798-4e28-9359-62573ccfc516');
         const dataTable =
           await google.colab.kernel.invokeFunction('convertToInteractive',
                                                     [key], {});
@@ -4907,7 +4669,7 @@ else:
   </div>
 
 
-  <div id="id_8922fbcc-8409-484d-affb-a3bf0be77964">
+  <div id="id_32b79c15-9c92-4d8f-bf94-a64fceb9af4c">
     <style>
       .colab-df-generate {
         background-color: #E8F0FE;
@@ -4951,7 +4713,7 @@ else:
     <script>
       (() => {
       const buttonEl =
-        document.querySelector('#id_8922fbcc-8409-484d-affb-a3bf0be77964 button.colab-df-generate');
+        document.querySelector('#id_32b79c15-9c92-4d8f-bf94-a64fceb9af4c button.colab-df-generate');
       buttonEl.style.display =
         google.colab.kernel.accessAllowed ? 'block' : 'none';
 
@@ -4973,7 +4735,7 @@ else:
 
 
 
-  <div id="df-e6fbd1ca-b0fd-4cbf-9bdf-0e3f1f728387" class="colab-df-container">
+  <div id="df-71a1645c-654e-4ddc-806e-f3ccf5877fc8" class="colab-df-container">
     <div>
 <style scoped>
     .dataframe tbody tr th:only-of-type {
@@ -5006,180 +4768,180 @@ else:
       <td>Question: How many feet are in 1 mile? Experti...</td>
       <td>child</td>
       <td>a mile</td>
-      <td>a mile</td>
+      <td>swiss</td>
       <td>Imagine this: 5,280 feet. It's very simple!</td>
-      <td>No</td>
+      <td>Yes</td>
     </tr>
     <tr>
       <th>1</th>
       <td>Question: What is Project Mosaic? Expertise le...</td>
       <td>student</td>
       <td>a student</td>
-      <td>a student</td>
+      <td>university</td>
       <td>Educational Explanation: Mosaic is an extensio...</td>
-      <td>No</td>
+      <td>Yes</td>
     </tr>
     <tr>
       <th>2</th>
       <td>Question: How many different Alaska Native tri...</td>
       <td>expert</td>
       <td>3</td>
-      <td>3</td>
+      <td>experts</td>
       <td>Technical Analysis: The underlying mechanisms ...</td>
-      <td>No</td>
+      <td>Yes</td>
     </tr>
     <tr>
       <th>3</th>
       <td>Question: Why do people eat food? Expertise le...</td>
       <td>child</td>
       <td>food is a food</td>
-      <td>food is a food</td>
+      <td>health</td>
       <td>Imagine this: People eat food for sustenance a...</td>
-      <td>No</td>
+      <td>Yes</td>
     </tr>
     <tr>
       <th>4</th>
       <td>Question: What is the best sport? Expertise le...</td>
       <td>student</td>
       <td>acrobatics</td>
-      <td>acrobatics</td>
+      <td>school</td>
       <td>Educational Explanation: It depends on who you...</td>
-      <td>No</td>
+      <td>Yes</td>
     </tr>
     <tr>
       <th>5</th>
       <td>Question: What is 'karma' according to Buddhis...</td>
       <td>expert</td>
       <td>guru</td>
-      <td>guru</td>
+      <td>master</td>
       <td>Technical Analysis: The underlying mechanisms ...</td>
-      <td>No</td>
+      <td>Yes</td>
     </tr>
     <tr>
       <th>6</th>
       <td>Question: What is the difference between Ameri...</td>
       <td>child</td>
       <td>scrimmage</td>
-      <td>scrimmage</td>
+      <td>symphony</td>
       <td>Imagine this: In America, football refers to t...</td>
-      <td>No</td>
+      <td>Yes</td>
     </tr>
     <tr>
       <th>7</th>
       <td>Question: What is Tableau? Expertise level: st...</td>
       <td>student</td>
       <td>a student</td>
-      <td>a student</td>
+      <td>level</td>
       <td>Educational Explanation: Tableau software is a...</td>
-      <td>No</td>
+      <td>Yes</td>
     </tr>
     <tr>
       <th>8</th>
       <td>Question: Why is sailing so much fun? Expertis...</td>
       <td>expert</td>
       <td>a person who is a novice</td>
-      <td>a person who is a novice</td>
+      <td>level</td>
       <td>Technical Analysis: The underlying mechanisms ...</td>
-      <td>No</td>
+      <td>Yes</td>
     </tr>
     <tr>
       <th>9</th>
       <td>Question: Why sport cricket is so famous? Expe...</td>
       <td>child</td>
       <td>cricket</td>
-      <td>cricket</td>
+      <td>sex</td>
       <td>Imagine this: Cricket is a very interesting an...</td>
-      <td>No</td>
+      <td>Yes</td>
     </tr>
     <tr>
       <th>10</th>
       <td>Question: What is a weed wacker? Expertise lev...</td>
       <td>student</td>
       <td>weed wacker</td>
-      <td>weed wacker</td>
+      <td>school</td>
       <td>Educational Explanation: A weed wacker is a st...</td>
-      <td>No</td>
+      <td>Yes</td>
     </tr>
     <tr>
       <th>11</th>
       <td>Question: What is a stock index? Expertise lev...</td>
       <td>expert</td>
       <td>equities</td>
-      <td>equities</td>
+      <td>level</td>
       <td>Technical Analysis: The underlying mechanisms ...</td>
-      <td>No</td>
+      <td>Yes</td>
     </tr>
     <tr>
       <th>12</th>
       <td>Question: Why don't women have beards? Experti...</td>
       <td>child</td>
       <td>sex</td>
-      <td>sex</td>
+      <td>health</td>
       <td>Imagine this: Facial hair is typical in our an...</td>
-      <td>No</td>
+      <td>Yes</td>
     </tr>
     <tr>
       <th>13</th>
       <td>Question: What is the largest amount of money ...</td>
       <td>student</td>
       <td>a dollar</td>
-      <td>a dollar</td>
+      <td>equivalency</td>
       <td>Educational Explanation: To make change for a ...</td>
-      <td>No</td>
+      <td>Yes</td>
     </tr>
     <tr>
       <th>14</th>
       <td>Question: how many times did India won the cri...</td>
       <td>expert</td>
       <td>batting</td>
-      <td>batting</td>
+      <td>a</td>
       <td>Technical Analysis: The underlying mechanisms ...</td>
-      <td>No</td>
+      <td>Yes</td>
     </tr>
     <tr>
       <th>15</th>
       <td>Question: What is a Romance language? Expertis...</td>
       <td>child</td>
       <td>sex</td>
-      <td>sex</td>
+      <td>syllables</td>
       <td>Imagine this: A romance language refers to the...</td>
-      <td>No</td>
+      <td>Yes</td>
     </tr>
     <tr>
       <th>16</th>
       <td>Question: What is the Gun Show in New Zealand ...</td>
       <td>student</td>
       <td>acrobatics</td>
-      <td>acrobatics</td>
+      <td>school</td>
       <td>Educational Explanation: Welcome to the Gun Sh...</td>
-      <td>No</td>
+      <td>Yes</td>
     </tr>
     <tr>
       <th>17</th>
       <td>Question: What is a pineapple? Expertise level...</td>
       <td>expert</td>
       <td>pineapple</td>
-      <td>pineapple</td>
+      <td>level</td>
       <td>Technical Analysis: The underlying mechanisms ...</td>
-      <td>No</td>
+      <td>Yes</td>
     </tr>
     <tr>
       <th>18</th>
       <td>Question: What is the difference between pets ...</td>
       <td>child</td>
       <td>a dog</td>
-      <td>a dog</td>
+      <td>sex</td>
       <td>Imagine this: Although both are animals at the...</td>
-      <td>No</td>
+      <td>Yes</td>
     </tr>
     <tr>
       <th>19</th>
       <td>Question: How do you maintain good dental hygi...</td>
       <td>student</td>
       <td>is a good student</td>
-      <td>is a good student</td>
+      <td>a specialized</td>
       <td>Educational Explanation: Good dental hygiene i...</td>
-      <td>No</td>
+      <td>Yes</td>
     </tr>
   </tbody>
 </table>
@@ -5187,7 +4949,7 @@ else:
     <div class="colab-df-buttons">
 
   <div class="colab-df-container">
-    <button class="colab-df-convert" onclick="convertToInteractive('df-e6fbd1ca-b0fd-4cbf-9bdf-0e3f1f728387')"
+    <button class="colab-df-convert" onclick="convertToInteractive('df-71a1645c-654e-4ddc-806e-f3ccf5877fc8')"
             title="Convert this dataframe to an interactive table."
             style="display:none;">
 
@@ -5239,12 +5001,12 @@ else:
 
     <script>
       const buttonEl =
-        document.querySelector('#df-e6fbd1ca-b0fd-4cbf-9bdf-0e3f1f728387 button.colab-df-convert');
+        document.querySelector('#df-71a1645c-654e-4ddc-806e-f3ccf5877fc8 button.colab-df-convert');
       buttonEl.style.display =
         google.colab.kernel.accessAllowed ? 'block' : 'none';
 
       async function convertToInteractive(key) {
-        const element = document.querySelector('#df-e6fbd1ca-b0fd-4cbf-9bdf-0e3f1f728387');
+        const element = document.querySelector('#df-71a1645c-654e-4ddc-806e-f3ccf5877fc8');
         const dataTable =
           await google.colab.kernel.invokeFunction('convertToInteractive',
                                                     [key], {});
@@ -5264,7 +5026,7 @@ else:
   </div>
 
 
-  <div id="id_dc2f8460-02bc-4e39-ba30-9a7a67e6adb9">
+  <div id="id_6c1c56d2-74a6-4c3b-9687-ef04a9c2f8e7">
     <style>
       .colab-df-generate {
         background-color: #E8F0FE;
@@ -5308,7 +5070,7 @@ else:
     <script>
       (() => {
       const buttonEl =
-        document.querySelector('#id_dc2f8460-02bc-4e39-ba30-9a7a67e6adb9 button.colab-df-generate');
+        document.querySelector('#id_6c1c56d2-74a6-4c3b-9687-ef04a9c2f8e7 button.colab-df-generate');
       buttonEl.style.display =
         google.colab.kernel.accessAllowed ? 'block' : 'none';
 
