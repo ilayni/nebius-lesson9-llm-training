@@ -146,9 +146,9 @@
 
 Quick fixes that would push the score higher:
 
-1. **Task 1.4 grammar (~30 sec):** Fix `"expertise.even"` → `"expertise, even"`.
-2. **Task 1.3 FLAN-T5 analysis (~1 min):** Change "0 out of 20 rows changed" → "18 out of 20 rows changed in name only — outputs swapped one bad token for another". Remove "(only 12 training steps)".
-3. **Task 1.3 SmolLM2 Notes (~5 min):** Add at least brief notes for the 20 rows. Even short observations like "format prefix correct, content faithful" or "prefix correct but truncated" would address the missing column.
+1. **Task 1.4 grammar (~30 sec):** Fix `"expertise.even"` → `"expertise, even"`. - done
+2. **Task 1.3 FLAN-T5 analysis (~1 min):** Change "0 out of 20 rows changed" → "18 out of 20 rows changed in name only — outputs swapped one bad token for another". Remove "(only 12 training steps)". - done
+3. **Task 1.3 SmolLM2 Notes (~5 min):** Add at least brief notes for the 20 rows. Even short observations like "format prefix correct, content faithful" or "prefix correct but truncated" would address the missing column. 
 4. **Task 1.1 (optional, larger effort):** Add a one-sentence acknowledgement that test answers use a template based on Dolly responses rather than hand-crafted level-appropriate answers — shows awareness.
 
 After 1+2+3 (about 7 minutes of work), expected score: **~88/100**.
