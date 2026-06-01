@@ -44,3 +44,7 @@ notebook_config.json
 
 # Claude Code
 .claude/
+
+# Large files (>5 MB)
+boris/
+*.zip
